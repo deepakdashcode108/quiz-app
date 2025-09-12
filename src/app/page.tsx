@@ -18,8 +18,9 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Trash2, PlusCircle } from "lucide-react";
 import katex from "katex";
+import "katex/dist/katex.min.css";
 
-// ✅ Import & register Quill formats (v3 requires this)
+// ✅ Quill v3 imports
 import { Quill } from "react-quill-new";
 import Bold from "quill/formats/bold";
 import Italic from "quill/formats/italic";
@@ -27,13 +28,17 @@ import Underline from "quill/formats/underline";
 import Strike from "quill/formats/strike";
 import List from "quill/formats/list";
 import Image from "quill/formats/image";
+import Formula from "quill/formats/formula";
 
+// ✅ Register formats
 Quill.register(Bold, true);
 Quill.register(Italic, true);
 Quill.register(Underline, true);
 Quill.register(Strike, true);
 Quill.register(List, true);
 Quill.register(Image, true);
+(Formula as any).katex = katex; // attach KaTeX so Quill can insert formulas
+Quill.register(Formula, true);
 
 // ---------- Types ----------
 interface Option {
@@ -63,6 +68,7 @@ const RichTextViewer: React.FC<{ htmlContent: string }> = ({ htmlContent }) => {
 
   useEffect(() => {
     if (contentRef.current) {
+      // 1. Render <span class="ql-formula">
       const formulas = contentRef.current.querySelectorAll(".ql-formula");
       formulas.forEach((el) => {
         const formula = el.getAttribute("data-value");
@@ -78,6 +84,67 @@ const RichTextViewer: React.FC<{ htmlContent: string }> = ({ htmlContent }) => {
           }
         }
       });
+
+      // 2. Render inline $...$ and block $$...$$ formulas in text
+      const walk = (node: Node) => {
+        if (node.nodeType === Node.TEXT_NODE) {
+          const text = node.textContent || "";
+          const parent = node.parentNode as HTMLElement;
+          if (!parent) return;
+
+          // Inline math: $...$
+          const inlineRegex = /\$(.+?)\$/g;
+          // Block math: $$...$$
+          const blockRegex = /\$\$(.+?)\$\$/g;
+
+          if (blockRegex.test(text) || inlineRegex.test(text)) {
+            const frag = document.createDocumentFragment();
+            let lastIndex = 0;
+            text.replace(
+              /(\$\$[^$]+\$\$|\$[^$]+\$)/g,
+              (match, expr, offset) => {
+                // text before formula
+                if (offset > lastIndex) {
+                  frag.appendChild(
+                    document.createTextNode(text.slice(lastIndex, offset))
+                  );
+                }
+                // formula itself
+                const span = document.createElement("span");
+                try {
+                  if (match.startsWith("$$")) {
+                    katex.render(match.slice(2, -2), span, {
+                      throwOnError: false,
+                      displayMode: true,
+                    });
+                  } else {
+                    katex.render(match.slice(1, -1), span, {
+                      throwOnError: false,
+                      displayMode: false,
+                    });
+                  }
+                } catch (e) {
+                  span.textContent = match;
+                }
+                frag.appendChild(span);
+                lastIndex = offset + match.length;
+                return match;
+              }
+            );
+            // remaining text
+            if (lastIndex < text.length) {
+              frag.appendChild(
+                document.createTextNode(text.slice(lastIndex))
+              );
+            }
+            parent.replaceChild(frag, node);
+          }
+        } else if (node.nodeType === Node.ELEMENT_NODE) {
+          node.childNodes.forEach(walk);
+        }
+      };
+
+      walk(contentRef.current);
     }
   }, [htmlContent]);
 
@@ -91,7 +158,7 @@ export default function CreateQuizPage() {
   const [questions, setQuestions] = useState<Question[]>([]);
   const [isDialogOpen, setIsDialogOpen] = useState<boolean>(false);
 
-  // ✅ Quill toolbar + custom image handler
+  // ✅ Quill toolbar + custom handlers
   const quillModules = useMemo(
     () => ({
       toolbar: {
@@ -109,6 +176,15 @@ export default function CreateQuizPage() {
               const range = this.quill.getSelection();
               if (range) {
                 this.quill.insertEmbed(range.index, "image", url, "user");
+              }
+            }
+          },
+          formula: function (this: any) {
+            const latex = prompt("Enter LaTeX formula (e.g. x^2 + y^2 = z^2)");
+            if (latex) {
+              const range = this.quill.getSelection();
+              if (range) {
+                this.quill.insertEmbed(range.index, "formula", latex, "user");
               }
             }
           },
@@ -205,7 +281,7 @@ export default function CreateQuizPage() {
             onChange={setQuestionText}
             modules={quillModules}
             formats={quillFormats}
-            placeholder="Type your question (supports LaTeX like x^2 and images by URL)"
+            placeholder="Type your question (supports LaTeX with fx button or $...$)"
           />
         </div>
 
@@ -263,8 +339,8 @@ export default function CreateQuizPage() {
             <DialogHeader>
               <DialogTitle>Add a New Question</DialogTitle>
               <DialogDescription>
-                Use the editor to create your question and options. Use the fx button
-                for formulas, and the image button for images by URL.
+                Use the editor to create your question and options. Use the fx
+                button for formulas, $...$ for inline math, and $$...$$ for block math.
               </DialogDescription>
             </DialogHeader>
             <QuestionForm onSave={handleAddQuestion} />
