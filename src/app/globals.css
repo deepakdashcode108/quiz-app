@@ -120,3 +120,14 @@
     @apply bg-background text-foreground;
   }
 }
+.ql-editor img {
+  height: 200px;
+  width: auto;   /* keeps aspect ratio */
+  object-fit: contain;
+}
+
+.ql-container img {
+  height: 200px;
+  width: auto;
+  object-fit: contain;
+}
