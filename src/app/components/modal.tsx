@@ -53,6 +53,8 @@ const quillFormats = [
     "formula",
 ];
 
+import {GetAllDomain} from "@/Helper/Services/DomainServices/GetAllDomain"
+
 // --------- RichTextViewer ----------
 const RichTextViewer: React.FC<{ content: string }> = ({ content }) => {
     const ref = useRef<HTMLDivElement>(null);
@@ -261,7 +263,7 @@ const QuestionForm: React.FC<{ onSave: (q: Question) => void }> = ({ onSave }) =
                         <div key={i} className="flex items-start gap-2">
                             <div className="flex-1">
                                 <ReactQuill
-                                    ref={(el) => (optionRefs.current[i] = el)}
+                                    ref={(el: any) => (optionRefs.current[i] = el)}
                                     theme="snow"
                                     value={opt.text}
                                     onChange={(val) => {
@@ -322,13 +324,36 @@ const QuestionForm: React.FC<{ onSave: (q: Question) => void }> = ({ onSave }) =
 };
 
 // --------- CreateQuizPage ----------
+type DomainCall = {
+    id: number,
+    name: string
+}
 export default function Modal() {
     const [questions, setQuestions] = useState<Question[]>([]);
+    const [domains , setDomains] = useState<Array<DomainCall> | null>();
 
     useEffect(() => {
         const saved = localStorage.getItem("quizQuestions");
         if (saved) setQuestions(JSON.parse(saved));
     }, []);
+
+     useEffect(() => {
+    async function fetchDomains() {
+      try {
+        const result = await GetAllDomain(); 
+        console.log('hhhhhhhhhhhhhhhhhhh',result.data);
+
+        // const enriched = enrichDomains(result.data);
+        setDomains(result.data);
+      } catch (error) {
+        console.log(error);
+        // fallback or retry logic if needed
+      }
+    }
+
+    fetchDomains();
+  }, []);
+ 
 
     useEffect(() => {
         localStorage.setItem("quizQuestions", JSON.stringify(questions));
@@ -350,9 +375,12 @@ export default function Modal() {
                     <SelectContent>
                         <SelectGroup>
                             <SelectLabel>Domain</SelectLabel>
-                            <SelectItem value="CSE">CSE</SelectItem>
-                            <SelectItem value="IT">IT</SelectItem>
-                            <SelectItem value="ETC">ETC</SelectItem>
+                            {
+                                domains &&
+                                domains!.map(element => {
+                                    return <SelectItem key={element?.id.toString()} value={element?.id.toString()}>{element.name}</SelectItem>
+                                })
+                            }
                         </SelectGroup>
                     </SelectContent>
                 </Select>
@@ -364,9 +392,7 @@ export default function Modal() {
                     <SelectContent>
                         <SelectGroup>
                             <SelectLabel>Subject</SelectLabel>
-                            <SelectItem value="CSE">CSE</SelectItem>
-                            <SelectItem value="IT">IT</SelectItem>
-                            <SelectItem value="ETC">ETC</SelectItem>
+                            
                         </SelectGroup>
                     </SelectContent>
                 </Select>
