@@ -21,6 +21,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { AddQuestion } from "@/Helper/Services/QuestionServices/AddQuestion"
 
 if (typeof window !== "undefined") {
     (window as any).katex = katex;
@@ -38,7 +39,22 @@ type Question = {
     text: string;
     options: Option[];
     explanation: string;
+    type: string,
+    min_value: number,
+    max_value: number,
+    subject_id: string
 };
+
+type DomainCall = {
+    id: number,
+    name: string
+}
+
+type SubjectCall = {
+    id: number,
+    name: string,
+    domainid: number
+}
 
 const quillFormats = [
     "header",
@@ -53,7 +69,8 @@ const quillFormats = [
     "formula",
 ];
 
-import {GetAllDomain} from "@/Helper/Services/DomainServices/GetAllDomain"
+import { GetAllDomain } from "@/Helper/Services/DomainServices/GetAllDomain"
+import { GetAllSubjects } from "@/Helper/Services/SubjectServices/GetAllSubject"
 
 // --------- RichTextViewer ----------
 const RichTextViewer: React.FC<{ content: string }> = ({ content }) => {
@@ -132,12 +149,13 @@ const LatexEditor: React.FC<{ onInsert: (latex: string) => void }> = ({ onInsert
 };
 
 // --------- QuestionForm ----------
-const QuestionForm: React.FC<{ onSave: (q: Question) => void }> = ({ onSave }) => {
+const QuestionForm: React.FC<{ onSave: (q: Question) => void, selectedsubject: string, selecteddomain: string, typeofquestion: string }> = ({ onSave, selectedsubject, selecteddomain, typeofquestion }) => {
     const [questionText, setQuestionText] = useState("");
     const [options, setOptions] = useState<Option[]>([{ text: "" }, { text: "" }]);
-    const [correct, setCorrect] = useState<string | null>(null);
+    const [correct, setCorrect] = useState<string[] | null>([]);
     const [explanation, setExplanation] = useState("");
-
+    const [minValue, setMinValue] = useState<number>(0);
+    const [maxValue, setMaxValue] = useState<number>(0);
     const [showLatexDialog, setShowLatexDialog] = useState(false);
     const [activeEditor, setActiveEditor] = useState<{
         type: "question" | "option" | "explanation";
@@ -217,27 +235,58 @@ const QuestionForm: React.FC<{ onSave: (q: Question) => void }> = ({ onSave }) =
         setActiveEditor(null);
     };
 
-    const saveQuestion = () => {
+    const saveQuestion = async () => {
         if (!questionText.trim()) return alert("Enter a question!");
-        if (options.some((o) => !o.text.trim())) return alert("All options required!");
-        if (correct === null) return alert("Select correct answer!");
+        if(!typeofquestion) return alert(" Question type is required");
+        if(typeofquestion==="NAT") setOptions([]);
+        if (typeofquestion!="NAT" && options.some((o) => !o.text.trim())) return alert("All options required!");
+        if (typeofquestion!="NAT" && correct?.length==0) return alert("Select correct answer!");
         if (!explanation.trim()) return alert("Enter explanation!");
+        if (!selecteddomain || !selectedsubject) return alert("domain and subject required");
+        
 
-        onSave({
+        const data = {
             id: Date.now().toString(),
             text: questionText,
             options: options.map((o, i) => ({
                 ...o,
-                isCorrect: correct === i.toString(),
+                isCorrect: correct?.includes(i.toString()),
             })),
             explanation,
-        });
+            subject_id: selectedsubject,
+            min_value: minValue,
+            max_value: maxValue,
+            type: typeofquestion
+        }
+
+        onSave(data);
+        console.log(data);
+
+        try {
+            const result = await AddQuestion(Number(selecteddomain), data);
+        } catch (error) {
+
+        }
 
         setQuestionText("");
         setOptions([{ text: "" }, { text: "" }]);
-        setCorrect(null);
+        setCorrect([]);
         setExplanation("");
     };
+
+
+    const togglecorrect = (optionId: string) => {
+        console.log(correct);
+        // if (!correct) return;
+        if (correct?.includes(optionId)) {
+            console.log(0);
+            setCorrect(correct?.filter(id => id !== optionId));
+        } else {
+            if (!correct) setCorrect([optionId])
+            else
+                setCorrect([...correct, optionId]);
+        }
+    }
 
     return (
         <div className="grid gap-6 py-4">
@@ -255,44 +304,73 @@ const QuestionForm: React.FC<{ onSave: (q: Question) => void }> = ({ onSave }) =
                 />
             </div>
 
-            {/* Options */}
-            <div>
-                <Label className="font-semibold mb-2 block">Options</Label>
-                <div className="space-y-4">
-                    {options.map((opt, i) => (
-                        <div key={i} className="flex items-start gap-2">
-                            <div className="flex-1">
-                                <ReactQuill
-                                    ref={(el: any) => (optionRefs.current[i] = el)}
-                                    theme="snow"
-                                    value={opt.text}
-                                    onChange={(val) => {
-                                        const newOpts = [...options];
-                                        newOpts[i].text = val;
-                                        setOptions(newOpts);
-                                    }}
-                                    modules={quillModules}
-                                    formats={quillFormats}
-                                    placeholder={`Option ${i + 1}`}
+            {typeofquestion === "NAT" ? <>
+
+                <div>
+                    <Label className="font-semibold mb-2 block">Ans</Label>
+
+                    <input
+                        type="number"
+                        name="minvalue"
+                        placeholder="min value"
+                        className="border"
+                        value={minValue ?? ""}
+                        onChange={(e) => setMinValue(Number(e.target.value))}
+                    />
+
+                    <input
+                        type="number"
+                        name="maxvalue"
+                        placeholder="max value"
+                        className="border"
+                        value={maxValue ?? ""}
+                        onChange={(e) => setMaxValue(Number(e.target.value))}
+                    />
+                </div>
+
+            </> : <>
+
+                {/* Options */}
+                <div>
+                    <Label className="font-semibold mb-2 block">Options</Label>
+                    <div className="space-y-4">
+                        {options.map((opt, i) => (
+                            <div key={i} className="flex items-start gap-2">
+                                <div className="flex-1">
+                                    <ReactQuill
+                                        ref={(el: any) => (optionRefs.current[i] = el)}
+                                        theme="snow"
+                                        value={opt.text}
+                                        onChange={(val) => {
+                                            const newOpts = [...options];
+                                            newOpts[i].text = val;
+                                            setOptions(newOpts);
+                                        }}
+                                        modules={quillModules}
+                                        formats={quillFormats}
+                                        placeholder={`Option ${i + 1}`}
+                                    />
+                                </div>
+                                <input
+                                    type="checkbox"
+                                    name="correct"
+                                    checked={correct?.includes(i.toString())}
+                                    onChange={() => togglecorrect(i.toString())}
                                 />
                             </div>
-                            <input
-                                type="radio"
-                                name="correct"
-                                checked={correct === i.toString()}
-                                onChange={() => setCorrect(i.toString())}
-                            />
-                        </div>
-                    ))}
+                        ))}
+                    </div>
+                    <Button
+                        variant="outline"
+                        className="mt-2"
+                        onClick={() => setOptions([...options, { text: "" }])}
+                    >
+                        Add Option
+                    </Button>
                 </div>
-                <Button
-                    variant="outline"
-                    className="mt-2"
-                    onClick={() => setOptions([...options, { text: "" }])}
-                >
-                    Add Option
-                </Button>
-            </div>
+            </>}
+
+
 
             {/* Explanation */}
             <div>
@@ -324,40 +402,54 @@ const QuestionForm: React.FC<{ onSave: (q: Question) => void }> = ({ onSave }) =
 };
 
 // --------- CreateQuizPage ----------
-type DomainCall = {
-    id: number,
-    name: string
-}
+
 export default function Modal() {
     const [questions, setQuestions] = useState<Question[]>([]);
-    const [domains , setDomains] = useState<Array<DomainCall> | null>();
+    const [domains, setDomains] = useState<Array<DomainCall> | null>();
+    const [subjects, setSubjects] = useState<Array<SubjectCall> | null>();
+    const [selectedsubject, setSelectedSubject] = useState("");
+    const [selecteddomain, setselectdDomain] = useState("");
+    const [questiontype, setquestionTyoe] = useState("");
 
     useEffect(() => {
         const saved = localStorage.getItem("quizQuestions");
         if (saved) setQuestions(JSON.parse(saved));
     }, []);
 
-     useEffect(() => {
-    async function fetchDomains() {
-      try {
-        const result = await GetAllDomain(); 
-        console.log('hhhhhhhhhhhhhhhhhhh',result.data);
+    useEffect(() => {
+        async function fetchDomains() {
+            try {
+                const result = await GetAllDomain();
+                console.log(result.data);
 
-        // const enriched = enrichDomains(result.data);
-        setDomains(result.data);
-      } catch (error) {
-        console.log(error);
-        // fallback or retry logic if needed
-      }
-    }
+                // const enriched = enrichDomains(result.data);
+                setDomains(result.data);
+            } catch (error) {
+                console.log(error);
+                // fallback or retry logic if needed
+            }
+        }
 
-    fetchDomains();
-  }, []);
- 
+        fetchDomains();
+    }, []);
+
 
     useEffect(() => {
         localStorage.setItem("quizQuestions", JSON.stringify(questions));
     }, [questions]);
+
+
+    const collectsubject = async (domainid: string) => {
+        try {
+            setselectdDomain(domainid);
+            const result = await GetAllSubjects(domainid);
+            setSubjects(result?.data);
+            console.log(result?.data);
+
+        } catch (error) {
+
+        }
+    }
 
     const handleSaveQuestion = (q: Question) => {
         setQuestions([...questions, q]);
@@ -378,7 +470,7 @@ export default function Modal() {
                             {
                                 domains &&
                                 domains!.map(element => {
-                                    return <SelectItem key={element?.id.toString()} value={element?.id.toString()}>{element.name}</SelectItem>
+                                    return <SelectItem key={element?.id.toString()} value={element?.id.toString()} onClick={() => collectsubject(element?.id.toString())}>{element.name}</SelectItem>
                                 })
                             }
                         </SelectGroup>
@@ -392,7 +484,12 @@ export default function Modal() {
                     <SelectContent>
                         <SelectGroup>
                             <SelectLabel>Subject</SelectLabel>
-                            
+                            {
+                                subjects &&
+                                subjects!.map(element => {
+                                    return <SelectItem key={element?.id.toString()} value={element?.id.toString()} onClick={() => setSelectedSubject(element?.id.toString())} >{element.name}</SelectItem>
+                                })
+                            }
                         </SelectGroup>
                     </SelectContent>
                 </Select>
@@ -404,9 +501,9 @@ export default function Modal() {
                     <SelectContent>
                         <SelectGroup>
                             <SelectLabel>Question Type</SelectLabel>
-                            <SelectItem value="MCQ">MCQ</SelectItem>
-                            <SelectItem value="MSQ">MSQ</SelectItem>
-                            <SelectItem value="NAT">NAT</SelectItem>
+                            <SelectItem value="MCQ" onClick={() => setquestionTyoe("MCQ")}>MCQ</SelectItem>
+                            <SelectItem value="MSQ" onClick={() => setquestionTyoe("MSQ")} >MSQ</SelectItem>
+                            <SelectItem value="NAT" onClick={() => setquestionTyoe("NAT")}>NAT</SelectItem>
                         </SelectGroup>
                     </SelectContent>
                 </Select>
@@ -414,7 +511,7 @@ export default function Modal() {
                     <CardTitle>Create Quiz</CardTitle>
                 </CardHeader>
                 <CardContent>
-                    <QuestionForm onSave={handleSaveQuestion} />
+                    <QuestionForm onSave={handleSaveQuestion} selectedsubject={selectedsubject} selecteddomain={selecteddomain} typeofquestion={questiontype} />
                 </CardContent>
             </Card>
 
