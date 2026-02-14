@@ -22,6 +22,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { AddQuestion } from "@/Helper/Services/QuestionServices/AddQuestion"
+import { GetAllDomain } from "@/Helper/Services/DomainServices/GetAllDomain"
+import { GetAllSubjects } from "@/Helper/Services/SubjectServices/GetAllSubject"
 
 if (typeof window !== "undefined") {
     (window as any).katex = katex;
@@ -29,20 +31,27 @@ if (typeof window !== "undefined") {
 
 const ReactQuill = dynamic(() => import("react-quill-new"), { ssr: false });
 
+// --- Types ---
+
 type Option = {
+    option?: string; // a, b, c, d
     text: string;
     isCorrect?: boolean;
 };
 
+// Matches your backend SQLModel
 type Question = {
-    id: string;
+    id?: string | number; // Optional for backend creation
     text: string;
-    options: Option[];
+    type: string;
+    min_value: number | null;
+    max_value: number | null;
+    options: Option[] | null; // JSON column
+    correct_answer: string; // e.g. "ab"
     explanation: string;
-    type: string,
-    min_value: number,
-    max_value: number,
-    subject_id: string
+    domain_id: number;
+    subject_id: number;
+    marks: number;
 };
 
 type DomainCall = {
@@ -68,9 +77,6 @@ const quillFormats = [
     "image",
     "formula",
 ];
-
-import { GetAllDomain } from "@/Helper/Services/DomainServices/GetAllDomain"
-import { GetAllSubjects } from "@/Helper/Services/SubjectServices/GetAllSubject"
 
 // --------- RichTextViewer ----------
 const RichTextViewer: React.FC<{ content: string }> = ({ content }) => {
@@ -152,10 +158,11 @@ const LatexEditor: React.FC<{ onInsert: (latex: string) => void }> = ({ onInsert
 const QuestionForm: React.FC<{ onSave: (q: Question) => void, selectedsubject: string, selecteddomain: string, typeofquestion: string }> = ({ onSave, selectedsubject, selecteddomain, typeofquestion }) => {
     const [questionText, setQuestionText] = useState("");
     const [options, setOptions] = useState<Option[]>([{ text: "" }, { text: "" }]);
-    const [correct, setCorrect] = useState<string[] | null>([]);
+    const [correct, setCorrect] = useState<string[] | null>([]); // Array of indices as strings ["0", "1"]
     const [explanation, setExplanation] = useState("");
     const [minValue, setMinValue] = useState<number>(0);
     const [maxValue, setMaxValue] = useState<number>(0);
+    const [marks, setMarks] = useState<number>(1.0); // Default marks
     const [showLatexDialog, setShowLatexDialog] = useState(false);
     const [activeEditor, setActiveEditor] = useState<{
         type: "question" | "option" | "explanation";
@@ -237,49 +244,69 @@ const QuestionForm: React.FC<{ onSave: (q: Question) => void, selectedsubject: s
 
     const saveQuestion = async () => {
         if (!questionText.trim()) return alert("Enter a question!");
-        if(!typeofquestion) return alert(" Question type is required");
-        if(typeofquestion==="NAT") setOptions([]);
-        if (typeofquestion!="NAT" && options.some((o) => !o.text.trim())) return alert("All options required!");
-        if (typeofquestion!="NAT" && correct?.length==0) return alert("Select correct answer!");
+        if (typeofquestion !== "NAT" && options.some((o) => !o.text.trim())) return alert("All options required!");
+        if (typeofquestion !== "NAT" && (!correct || correct.length === 0)) return alert("Select correct answer!");
         if (!explanation.trim()) return alert("Enter explanation!");
         if (!selecteddomain || !selectedsubject) return alert("domain and subject required");
         
+        // --- LOGIC CHANGE START ---
+        
+        const optionLetters = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
+        let correctAnswerStr = "";
+        let formattedOptions: Option[] | null = null;
 
-        const data = {
-            id: Date.now().toString(),
-            text: questionText,
-            options: options.map((o, i) => ({
-                ...o,
-                isCorrect: correct?.includes(i.toString()),
-            })),
-            explanation,
-            subject_id: selectedsubject,
-            min_value: minValue,
-            max_value: maxValue,
-            type: typeofquestion
+        if (typeofquestion === "MCQ" || typeofquestion === "MSQ") {
+            formattedOptions = options.map((o, i) => {
+                const isCorrect = correct?.includes(i.toString());
+                if (isCorrect) {
+                    correctAnswerStr += optionLetters[i]; // Concatenate letters: "a" + "b" -> "ab"
+                }
+                return {
+                    option: optionLetters[i], // "a", "b", etc.
+                    text: o.text,
+                    isCorrect: isCorrect // Optional, but good for frontend checking
+                };
+            });
         }
+
+        const data: Question = {
+            id: Date.now().toString(), // Helper ID for frontend list
+            text: questionText,
+            type: typeofquestion,
+            min_value: typeofquestion === "NAT" ? Number(minValue) : null,
+            max_value: typeofquestion === "NAT" ? Number(maxValue) : null,
+            options: formattedOptions, 
+            correct_answer: correctAnswerStr,
+            explanation,
+            domain_id: Number(selecteddomain),
+            subject_id: Number(selectedsubject),
+            marks: Number(marks)
+        }
+
+        // --- LOGIC CHANGE END ---
 
         onSave(data);
-        console.log(data);
+        console.log("Payload:", data);
 
         try {
-            const result = await AddQuestion(Number(selecteddomain), data);
+            await AddQuestion(Number(selecteddomain), data);
         } catch (error) {
-
+            console.error("Failed to save to backend:", error);
         }
 
+        // Reset Form
         setQuestionText("");
         setOptions([{ text: "" }, { text: "" }]);
         setCorrect([]);
         setExplanation("");
+        setMinValue(0);
+        setMaxValue(0);
+        setMarks(1.0);
     };
 
 
     const togglecorrect = (optionId: string) => {
-        console.log(correct);
-        // if (!correct) return;
         if (correct?.includes(optionId)) {
-            console.log(0);
             setCorrect(correct?.filter(id => id !== optionId));
         } else {
             if (!correct) setCorrect([optionId])
@@ -304,73 +331,88 @@ const QuestionForm: React.FC<{ onSave: (q: Question) => void, selectedsubject: s
                 />
             </div>
 
-            {typeofquestion === "NAT" ? <>
+            {/* Marks Input */}
+            <div>
+                <Label className="font-semibold mb-2 block">Marks</Label>
+                <Input 
+                    type="number" 
+                    placeholder="Enter marks" 
+                    value={marks} 
+                    onChange={(e) => setMarks(Number(e.target.value))}
+                    step="0.5"
+                    min="0"
+                />
+            </div>
 
-                <div>
-                    <Label className="font-semibold mb-2 block">Ans</Label>
-
-                    <input
-                        type="number"
-                        name="minvalue"
-                        placeholder="min value"
-                        className="border"
-                        value={minValue ?? ""}
-                        onChange={(e) => setMinValue(Number(e.target.value))}
-                    />
-
-                    <input
-                        type="number"
-                        name="maxvalue"
-                        placeholder="max value"
-                        className="border"
-                        value={maxValue ?? ""}
-                        onChange={(e) => setMaxValue(Number(e.target.value))}
-                    />
-                </div>
-
-            </> : <>
-
-                {/* Options */}
-                <div>
-                    <Label className="font-semibold mb-2 block">Options</Label>
-                    <div className="space-y-4">
-                        {options.map((opt, i) => (
-                            <div key={i} className="flex items-start gap-2">
-                                <div className="flex-1">
-                                    <ReactQuill
-                                        ref={(el: any) => (optionRefs.current[i] = el)}
-                                        theme="snow"
-                                        value={opt.text}
-                                        onChange={(val) => {
-                                            const newOpts = [...options];
-                                            newOpts[i].text = val;
-                                            setOptions(newOpts);
-                                        }}
-                                        modules={quillModules}
-                                        formats={quillFormats}
-                                        placeholder={`Option ${i + 1}`}
+            {typeofquestion === "NAT" ? (
+                <>
+                    <div className="flex gap-4">
+                        <div className="flex-1">
+                            <Label className="font-semibold mb-2 block">Min Value</Label>
+                            <Input
+                                type="number"
+                                name="minvalue"
+                                placeholder="min value"
+                                value={minValue ?? ""}
+                                onChange={(e) => setMinValue(Number(e.target.value))}
+                            />
+                        </div>
+                        <div className="flex-1">
+                            <Label className="font-semibold mb-2 block">Max Value</Label>
+                            <Input
+                                type="number"
+                                name="maxvalue"
+                                placeholder="max value"
+                                value={maxValue ?? ""}
+                                onChange={(e) => setMaxValue(Number(e.target.value))}
+                            />
+                        </div>
+                    </div>
+                </>
+            ) : (
+                <>
+                    {/* Options */}
+                    <div>
+                        <Label className="font-semibold mb-2 block">Options</Label>
+                        <div className="space-y-4">
+                            {options.map((opt, i) => (
+                                <div key={i} className="flex items-start gap-2">
+                                    <span className="mt-2 font-mono font-bold text-gray-500">{String.fromCharCode(97 + i)}.</span>
+                                    <div className="flex-1">
+                                        <ReactQuill
+                                            ref={(el: any) => (optionRefs.current[i] = el)}
+                                            theme="snow"
+                                            value={opt.text}
+                                            onChange={(val) => {
+                                                const newOpts = [...options];
+                                                newOpts[i].text = val;
+                                                setOptions(newOpts);
+                                            }}
+                                            modules={quillModules}
+                                            formats={quillFormats}
+                                            placeholder={`Option ${i + 1}`}
+                                        />
+                                    </div>
+                                    <input
+                                        type="checkbox"
+                                        name="correct"
+                                        className="mt-3 w-5 h-5"
+                                        checked={correct?.includes(i.toString())}
+                                        onChange={() => togglecorrect(i.toString())}
                                     />
                                 </div>
-                                <input
-                                    type="checkbox"
-                                    name="correct"
-                                    checked={correct?.includes(i.toString())}
-                                    onChange={() => togglecorrect(i.toString())}
-                                />
-                            </div>
-                        ))}
+                            ))}
+                        </div>
+                        <Button
+                            variant="outline"
+                            className="mt-2"
+                            onClick={() => setOptions([...options, { text: "" }])}
+                        >
+                            Add Option
+                        </Button>
                     </div>
-                    <Button
-                        variant="outline"
-                        className="mt-2"
-                        onClick={() => setOptions([...options, { text: "" }])}
-                    >
-                        Add Option
-                    </Button>
-                </div>
-            </>}
-
-
+                </>
+            )}
 
             {/* Explanation */}
             <div>
@@ -386,7 +428,7 @@ const QuestionForm: React.FC<{ onSave: (q: Question) => void, selectedsubject: s
                 />
             </div>
 
-            <Button onClick={saveQuestion}>Save Question</Button>
+            <Button onClick={saveQuestion} className="w-full">Save Question</Button>
 
             {/* LaTeX Dialog */}
             <Dialog open={showLatexDialog} onOpenChange={setShowLatexDialog}>
@@ -420,16 +462,11 @@ export default function Modal() {
         async function fetchDomains() {
             try {
                 const result = await GetAllDomain();
-                console.log(result.data);
-
-                // const enriched = enrichDomains(result.data);
                 setDomains(result.data);
             } catch (error) {
                 console.log(error);
-                // fallback or retry logic if needed
             }
         }
-
         fetchDomains();
     }, []);
 
@@ -444,10 +481,8 @@ export default function Modal() {
             setselectdDomain(domainid);
             const result = await GetAllSubjects(domainid);
             setSubjects(result?.data);
-            console.log(result?.data);
-
         } catch (error) {
-
+            console.log(error);
         }
     }
 
@@ -459,84 +494,115 @@ export default function Modal() {
         <div className="container mx-auto p-6 space-y-6">
 
             <Card>
+                <div className="flex flex-wrap gap-4 p-4 items-end">
+                    
+                    <div className="grid gap-2">
+                         <Label>Select Domain</Label>
+                         <Select onValueChange={(value) => collectsubject(value)}>
+                            <SelectTrigger className="w-[200px]">
+                                <SelectValue placeholder="Domain" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectGroup>
+                                    <SelectLabel>Domain</SelectLabel>
+                                    {domains && domains.map(element => (
+                                        <SelectItem key={element.id} value={element.id.toString()}>
+                                            {element.name}
+                                        </SelectItem>
+                                    ))}
+                                </SelectGroup>
+                            </SelectContent>
+                        </Select>
+                    </div>
 
-                <Select>
-                    <SelectTrigger className="w-[180px]">
-                        <SelectValue placeholder="Select a Domain" />
-                    </SelectTrigger>
-                    <SelectContent>
-                        <SelectGroup>
-                            <SelectLabel>Domain</SelectLabel>
-                            {
-                                domains &&
-                                domains!.map(element => {
-                                    return <SelectItem key={element?.id.toString()} value={element?.id.toString()} onClick={() => collectsubject(element?.id.toString())}>{element.name}</SelectItem>
-                                })
-                            }
-                        </SelectGroup>
-                    </SelectContent>
-                </Select>
+                    <div className="grid gap-2">
+                        <Label>Select Subject</Label>
+                        <Select onValueChange={(value) => setSelectedSubject(value)}>
+                            <SelectTrigger className="w-[200px]">
+                                <SelectValue placeholder="Subject" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectGroup>
+                                    <SelectLabel>Subject</SelectLabel>
+                                    {subjects && subjects.map(element => (
+                                        <SelectItem key={element.id} value={element.id.toString()}>
+                                            {element.name}
+                                        </SelectItem>
+                                    ))}
+                                </SelectGroup>
+                            </SelectContent>
+                        </Select>
+                    </div>
 
-                <Select>
-                    <SelectTrigger className="w-[180px]">
-                        <SelectValue placeholder="Select a Subject" />
-                    </SelectTrigger>
-                    <SelectContent>
-                        <SelectGroup>
-                            <SelectLabel>Subject</SelectLabel>
-                            {
-                                subjects &&
-                                subjects!.map(element => {
-                                    return <SelectItem key={element?.id.toString()} value={element?.id.toString()} onClick={() => setSelectedSubject(element?.id.toString())} >{element.name}</SelectItem>
-                                })
-                            }
-                        </SelectGroup>
-                    </SelectContent>
-                </Select>
+                    <div className="grid gap-2">
+                        <Label>Question Type</Label>
+                        <Select onValueChange={(value) => setquestionTyoe(value)}>
+                            <SelectTrigger className="w-[200px]">
+                                <SelectValue placeholder="Type" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectGroup>
+                                    <SelectLabel>Type</SelectLabel>
+                                    <SelectItem value="MCQ">MCQ</SelectItem>
+                                    <SelectItem value="MSQ">MSQ</SelectItem>
+                                    <SelectItem value="NAT">NAT</SelectItem>
+                                </SelectGroup>
+                            </SelectContent>
+                        </Select>
+                    </div>
+                </div>
 
-                <Select>
-                    <SelectTrigger className="w-[180px]">
-                        <SelectValue placeholder="Type of Question" />
-                    </SelectTrigger>
-                    <SelectContent>
-                        <SelectGroup>
-                            <SelectLabel>Question Type</SelectLabel>
-                            <SelectItem value="MCQ" onClick={() => setquestionTyoe("MCQ")}>MCQ</SelectItem>
-                            <SelectItem value="MSQ" onClick={() => setquestionTyoe("MSQ")} >MSQ</SelectItem>
-                            <SelectItem value="NAT" onClick={() => setquestionTyoe("NAT")}>NAT</SelectItem>
-                        </SelectGroup>
-                    </SelectContent>
-                </Select>
                 <CardHeader>
-                    <CardTitle>Create Quiz</CardTitle>
+                    <CardTitle>Add New Question</CardTitle>
                 </CardHeader>
                 <CardContent>
-                    <QuestionForm onSave={handleSaveQuestion} selectedsubject={selectedsubject} selecteddomain={selecteddomain} typeofquestion={questiontype} />
+                    <QuestionForm 
+                        onSave={handleSaveQuestion} 
+                        selectedsubject={selectedsubject} 
+                        selecteddomain={selecteddomain} 
+                        typeofquestion={questiontype} 
+                    />
                 </CardContent>
             </Card>
 
             <div className="space-y-4">
-                {questions.map((q) => (
-                    <Card key={q.id}>
-                        <CardHeader>
-                            <CardTitle>
+                <Label className="text-xl font-bold">Saved Questions Preview</Label>
+                {questions.map((q, idx) => (
+                    <Card key={idx}>
+                        <CardHeader className="flex flex-row justify-between items-start">
+                            <CardTitle className="text-lg">
+                                <span className="font-bold mr-2">Q{idx + 1}.</span>
                                 <RichTextViewer content={q.text} />
                             </CardTitle>
+                            <span className="text-sm font-mono bg-gray-100 px-2 py-1 rounded">
+                                Marks: {q.marks} | Type: {q.type}
+                            </span>
                         </CardHeader>
                         <CardContent>
-                            <ul className="list-disc pl-6 space-y-1">
-                                {q.options.map((opt, i) => (
-                                    <li
-                                        key={i}
-                                        className={opt.isCorrect ? "font-bold text-green-600" : ""}
-                                    >
-                                        <RichTextViewer content={opt.text} />
-                                    </li>
-                                ))}
-                            </ul>
-                            <div className="mt-4">
-                                <Label className="block font-semibold">Explanation:</Label>
-                                <RichTextViewer content={q.explanation} />
+                            {q.type === 'NAT' ? (
+                                <div className="mb-4 p-2 bg-yellow-50 border border-yellow-200 rounded">
+                                    <strong>Range:</strong> {q.min_value} - {q.max_value}
+                                </div>
+                            ) : (
+                                <ul className="list-none pl-0 space-y-2 mb-4">
+                                    {q.options && q.options.map((opt, i) => (
+                                        <li
+                                            key={i}
+                                            className={`flex gap-2 p-2 rounded ${q.correct_answer.includes(opt.option || '') ? "bg-green-50 border border-green-200" : "bg-gray-50"}`}
+                                        >
+                                            <span className="font-bold">{opt.option}.</span>
+                                            <RichTextViewer content={opt.text} />
+                                            {q.correct_answer.includes(opt.option || '') && <span className="ml-auto text-green-600 font-bold">✓</span>}
+                                        </li>
+                                    ))}
+                                </ul>
+                            )}
+                            
+                            <div className="mt-4 pt-4 border-t">
+                                <Label className="block font-semibold text-gray-700">Explanation:</Label>
+                                <div className="text-sm text-gray-600 mt-1">
+                                     <RichTextViewer content={q.explanation} />
+                                </div>
                             </div>
                         </CardContent>
                     </Card>
