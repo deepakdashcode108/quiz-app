@@ -4,6 +4,7 @@ import React, { useState, useEffect, useMemo, useRef } from "react";
 import dynamic from "next/dynamic";
 import katex from "katex";
 import "katex/dist/katex.min.css";
+import type ReactQuillType from "react-quill-new";
 import "react-quill-new/dist/quill.snow.css";
 import {
     Select,
@@ -24,13 +25,18 @@ import { Input } from "@/components/ui/input";
 import { AddQuestion } from "@/Helper/Services/QuestionServices/AddQuestion"
 import { GetAllDomain } from "@/Helper/Services/DomainServices/GetAllDomain"
 import { GetAllSubjects } from "@/Helper/Services/SubjectServices/GetAllSubject"
+import { AttachTagsToQuestion, CreateTag, GetAllTags } from "@/Helper/Services/TagServices/tagService";
+import { Badge } from "@/components/ui/badge";
 
 if (typeof window !== "undefined") {
     (window as any).katex = katex;
 }
 
-const ReactQuill = dynamic(() => import("react-quill-new"), { ssr: false });
-
+// const ReactQuill = dynamic(() => import("react-quill-new"), { ssr: false });
+const ReactQuill = dynamic(
+    () => import("react-quill-new"),
+    { ssr: false }
+) as typeof ReactQuillType;
 // --- Types ---
 
 type Option = {
@@ -173,6 +179,50 @@ const QuestionForm: React.FC<{ onSave: (q: Question) => void, selectedsubject: s
     const optionRefs = useRef<any[]>([]);
     const explanationRef = useRef<any>(null);
 
+
+    // Tags related styates
+    const [tags, setTags] = useState<Tag[]>([]);
+    const [newTag, setNewTag] = useState("");
+    const [selectedTags, setSelectedTags] = useState<string[]>([]);
+    const [loading, setLoading] = useState(false);
+
+    const fetchTags = async () => {
+        try {
+            const data = await GetAllTags();
+            //   console.log('Data is ', data)
+            setTags(data.data);
+        } catch (err) {
+            console.error(err);
+        }
+    };
+
+    const handleCreateTag = async () => {
+        if (!newTag.trim()) return;
+
+        try {
+            setLoading(true);
+            await CreateTag(newTag);
+            setNewTag("");
+            fetchTags();
+        } catch (err) {
+            console.error(err);
+        } finally {
+            setLoading(false);
+        }
+    };
+
+    const toggleTag = (tag: string) => {
+        if (selectedTags.includes(tag)) {
+            setSelectedTags(selectedTags.filter((t) => t !== tag));
+        } else {
+            setSelectedTags([...selectedTags, tag]);
+        }
+        console.log('current tags are ', selectedTags)
+    };
+
+    useEffect(() => {
+        fetchTags();
+    }, [])
     const quillModules = useMemo(
         () => ({
             toolbar: {
@@ -248,9 +298,9 @@ const QuestionForm: React.FC<{ onSave: (q: Question) => void, selectedsubject: s
         if (typeofquestion !== "NAT" && (!correct || correct.length === 0)) return alert("Select correct answer!");
         if (!explanation.trim()) return alert("Enter explanation!");
         if (!selecteddomain || !selectedsubject) return alert("domain and subject required");
-        
+
         // --- LOGIC CHANGE START ---
-        
+
         const optionLetters = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h'];
         let correctAnswerStr = "";
         let formattedOptions: Option[] | null = null;
@@ -275,7 +325,7 @@ const QuestionForm: React.FC<{ onSave: (q: Question) => void, selectedsubject: s
             type: typeofquestion,
             min_value: typeofquestion === "NAT" ? Number(minValue) : null,
             max_value: typeofquestion === "NAT" ? Number(maxValue) : null,
-            options: formattedOptions, 
+            options: formattedOptions,
             correct_answer: correctAnswerStr,
             explanation,
             domain_id: Number(selecteddomain),
@@ -289,7 +339,11 @@ const QuestionForm: React.FC<{ onSave: (q: Question) => void, selectedsubject: s
         console.log("Payload:", data);
 
         try {
-            await AddQuestion(Number(selecteddomain), data);
+            const res = await AddQuestion(Number(selecteddomain), data);
+            console.log('res inside is ', res);
+            console.log('selected tags that are sent to backend', selectedTags)
+            const addTagToQuestionResponse = await AttachTagsToQuestion(res.data.id, selectedTags);
+            setSelectedTags([]);
         } catch (error) {
             console.error("Failed to save to backend:", error);
         }
@@ -317,6 +371,7 @@ const QuestionForm: React.FC<{ onSave: (q: Question) => void, selectedsubject: s
 
     return (
         <div className="grid gap-6 py-4">
+
             {/* Question */}
             <div>
                 <Label className="font-semibold mb-2 block">Question</Label>
@@ -334,10 +389,10 @@ const QuestionForm: React.FC<{ onSave: (q: Question) => void, selectedsubject: s
             {/* Marks Input */}
             <div>
                 <Label className="font-semibold mb-2 block">Marks</Label>
-                <Input 
-                    type="number" 
-                    placeholder="Enter marks" 
-                    value={marks} 
+                <Input
+                    type="number"
+                    placeholder="Enter marks"
+                    value={marks}
                     onChange={(e) => setMarks(Number(e.target.value))}
                     step="0.5"
                     min="0"
@@ -428,6 +483,45 @@ const QuestionForm: React.FC<{ onSave: (q: Question) => void, selectedsubject: s
                 />
             </div>
 
+            <div className="p-8">
+                <Card>
+                    <CardContent className="space-y-6 pt-6">
+
+                        {/* Create Tag */}
+                        <div className="flex gap-3">
+                            <Input
+                                placeholder="Enter new tag name"
+                                value={newTag}
+                                onChange={(e) => setNewTag(e.target.value)}
+                            />
+
+                            <Button onClick={handleCreateTag} disabled={loading}>
+                                Create Tag
+                            </Button>
+                        </div>
+
+                        {/* Tag List */}
+                        <div className="flex flex-wrap gap-3">
+                            {tags.map((tag) => (
+                                <Badge
+                                    key={tag.id}
+                                    variant={selectedTags.includes(tag.name) ? "default" : "outline"}
+                                    className="cursor-pointer text-sm px-3 py-1"
+                                    onClick={() => toggleTag(tag.name)}
+                                >
+                                    {tag.name}
+                                </Badge>
+                            ))}
+                        </div>
+
+                        {/* Attach Button */}
+                        {/* <Button onClick={attachTags} disabled={selectedTags.length === 0}>
+                            Attach Selected Tags
+                        </Button> */}
+
+                    </CardContent>
+                </Card>
+            </div>
             <Button onClick={saveQuestion} className="w-full">Save Question</Button>
 
             {/* LaTeX Dialog */}
@@ -444,6 +538,10 @@ const QuestionForm: React.FC<{ onSave: (q: Question) => void, selectedsubject: s
 };
 
 // --------- CreateQuizPage ----------
+interface Tag {
+    id: number;
+    name: string;
+}
 
 export default function Modal() {
     const [questions, setQuestions] = useState<Question[]>([]);
@@ -453,9 +551,25 @@ export default function Modal() {
     const [selecteddomain, setselectdDomain] = useState("");
     const [questiontype, setquestionTyoe] = useState("");
 
+    // Tag related states
+    // const [tags, setTags] = useState<Tag[]>([]);
+    // const [newTag, setNewTag] = useState("");
+    // const [selectedTags, setSelectedTags] = useState<string[]>([]);
+    // const [loading, setLoading] = useState(false);
+
+    // const fetchTags = async () => {
+    //     try {
+    //         const data = await GetAllTags();
+    //         //   console.log('Data is ', data)
+    //         setTags(data.data);
+    //     } catch (err) {
+    //         console.error(err);
+    //     }
+    // };
     useEffect(() => {
         const saved = localStorage.getItem("quizQuestions");
         if (saved) setQuestions(JSON.parse(saved));
+        // fetchTags();
     }, []);
 
     useEffect(() => {
@@ -489,16 +603,49 @@ export default function Modal() {
     const handleSaveQuestion = (q: Question) => {
         setQuestions([...questions, q]);
     };
+    // const handleCreateTag = async () => {
+    //     if (!newTag.trim()) return;
+
+    //     try {
+    //         setLoading(true);
+    //         await CreateTag(newTag);
+    //         setNewTag("");
+    //         fetchTags();
+    //     } catch (err) {
+    //         console.error(err);
+    //     } finally {
+    //         setLoading(false);
+    //     }
+    // };
+
+    // const toggleTag = (tag: string) => {
+    //     if (selectedTags.includes(tag)) {
+    //         setSelectedTags(selectedTags.filter((t) => t !== tag));
+    //     } else {
+    //         setSelectedTags([...selectedTags, tag]);
+    //     }
+    // };
+
+    //   const attachTags = async () => {
+    //     if (selectedTags.length === 0) return;
+
+    //     try {
+    //       await AttachTagsToQuestion(questionId, selectedTags);
+    //       alert("Tags attached successfully");
+    //     } catch (err) {
+    //       console.error(err);
+    //     }
+    //   };
 
     return (
         <div className="container mx-auto p-6 space-y-6">
-
+            
             <Card>
                 <div className="flex flex-wrap gap-4 p-4 items-end">
-                    
+
                     <div className="grid gap-2">
-                         <Label>Select Domain</Label>
-                         <Select onValueChange={(value) => collectsubject(value)}>
+                        <Label>Select Domain</Label>
+                        <Select onValueChange={(value) => collectsubject(value)}>
                             <SelectTrigger className="w-[200px]">
                                 <SelectValue placeholder="Domain" />
                             </SelectTrigger>
@@ -556,11 +703,11 @@ export default function Modal() {
                     <CardTitle>Add New Question</CardTitle>
                 </CardHeader>
                 <CardContent>
-                    <QuestionForm 
-                        onSave={handleSaveQuestion} 
-                        selectedsubject={selectedsubject} 
-                        selecteddomain={selecteddomain} 
-                        typeofquestion={questiontype} 
+                    <QuestionForm
+                        onSave={handleSaveQuestion}
+                        selectedsubject={selectedsubject}
+                        selecteddomain={selecteddomain}
+                        typeofquestion={questiontype}
                     />
                 </CardContent>
             </Card>
@@ -597,11 +744,11 @@ export default function Modal() {
                                     ))}
                                 </ul>
                             )}
-                            
+
                             <div className="mt-4 pt-4 border-t">
                                 <Label className="block font-semibold text-gray-700">Explanation:</Label>
                                 <div className="text-sm text-gray-600 mt-1">
-                                     <RichTextViewer content={q.explanation} />
+                                    <RichTextViewer content={q.explanation} />
                                 </div>
                             </div>
                         </CardContent>
