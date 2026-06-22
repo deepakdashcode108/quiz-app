@@ -25,6 +25,8 @@ import { Input } from "@/components/ui/input";
 import { AddQuestion } from "@/Helper/Services/QuestionServices/AddQuestion"
 import { GetAllDomain } from "@/Helper/Services/DomainServices/GetAllDomain"
 import { GetAllSubjects } from "@/Helper/Services/SubjectServices/GetAllSubject"
+import { AddDomain } from "@/Helper/Services/DomainServices/AddDomain"
+import { AddSubject } from "@/Helper/Services/SubjectServices/AddSubject"
 import { AttachTagsToQuestion, CreateTag, GetAllTags } from "@/Helper/Services/TagServices/tagService";
 import { Badge } from "@/components/ui/badge";
 
@@ -235,12 +237,13 @@ const QuestionForm: React.FC<{ onSave: (q: Question) => void, selectedsubject: s
                 ],
                 handlers: {
                     image: function (this: any) {
+                        let range = this.quill.getSelection();
                         const url = prompt("Enter image URL");
                         if (url) {
-                            const range = this.quill.getSelection();
-                            if (range) {
-                                this.quill.insertEmbed(range.index, "image", url, "user");
+                            if (!range) {
+                                range = { index: this.quill.getLength() };
                             }
+                            this.quill.insertEmbed(range.index, "image", url, "user");
                         }
                     },
                     formula: function (this: any) {
@@ -551,6 +554,24 @@ export default function Modal() {
     const [selecteddomain, setselectdDomain] = useState("");
     const [questiontype, setquestionTyoe] = useState("");
 
+    const [showDomainDialog, setShowDomainDialog] = useState(false);
+    const [newDomainName, setNewDomainName] = useState("");
+    const [domainLoading, setDomainLoading] = useState(false);
+
+    const [showSubjectDialog, setShowSubjectDialog] = useState(false);
+    const [newSubjectName, setNewSubjectName] = useState("");
+    const [subjectLoading, setSubjectLoading] = useState(false);
+
+    async function fetchDomains() {
+        try {
+            const result = await GetAllDomain();
+            setDomains(result.data);
+        } catch (error) {
+            console.log(error);
+        }
+    }
+
+
     // Tag related states
     // const [tags, setTags] = useState<Tag[]>([]);
     // const [newTag, setNewTag] = useState("");
@@ -573,14 +594,6 @@ export default function Modal() {
     }, []);
 
     useEffect(() => {
-        async function fetchDomains() {
-            try {
-                const result = await GetAllDomain();
-                setDomains(result.data);
-            } catch (error) {
-                console.log(error);
-            }
-        }
         fetchDomains();
     }, []);
 
@@ -602,6 +615,38 @@ export default function Modal() {
 
     const handleSaveQuestion = (q: Question) => {
         setQuestions([...questions, q]);
+    };
+
+    const handleCreateDomain = async () => {
+        if (!newDomainName.trim()) return;
+        try {
+            setDomainLoading(true);
+            await AddDomain({ name: newDomainName });
+            setNewDomainName("");
+            setShowDomainDialog(false);
+            await fetchDomains();
+        } catch (error) {
+            console.log(error);
+            alert("Failed to create domain");
+        } finally {
+            setDomainLoading(false);
+        }
+    };
+
+    const handleCreateSubject = async () => {
+        if (!newSubjectName.trim() || !selecteddomain) return;
+        try {
+            setSubjectLoading(true);
+            await AddSubject(selecteddomain, { name: newSubjectName });
+            setNewSubjectName("");
+            setShowSubjectDialog(false);
+            await collectsubject(selecteddomain);
+        } catch (error) {
+            console.log(error);
+            alert("Failed to create subject");
+        } finally {
+            setSubjectLoading(false);
+        }
     };
     // const handleCreateTag = async () => {
     //     if (!newTag.trim()) return;
@@ -645,40 +690,50 @@ export default function Modal() {
 
                     <div className="grid gap-2">
                         <Label>Select Domain</Label>
-                        <Select onValueChange={(value) => collectsubject(value)}>
-                            <SelectTrigger className="w-[200px]">
-                                <SelectValue placeholder="Domain" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectGroup>
-                                    <SelectLabel>Domain</SelectLabel>
-                                    {domains && domains.map(element => (
-                                        <SelectItem key={element.id} value={element.id.toString()}>
-                                            {element.name}
-                                        </SelectItem>
-                                    ))}
-                                </SelectGroup>
-                            </SelectContent>
-                        </Select>
+                        <div className="flex gap-2">
+                            <Select onValueChange={(value) => collectsubject(value)}>
+                                <SelectTrigger className="w-[200px]">
+                                    <SelectValue placeholder="Domain" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectGroup>
+                                        <SelectLabel>Domain</SelectLabel>
+                                        {domains && domains.map(element => (
+                                            <SelectItem key={element.id} value={element.id.toString()}>
+                                                {element.name}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectGroup>
+                                </SelectContent>
+                            </Select>
+                            <Button variant="outline" size="icon" onClick={() => setShowDomainDialog(true)}>
+                                +
+                            </Button>
+                        </div>
                     </div>
 
                     <div className="grid gap-2">
                         <Label>Select Subject</Label>
-                        <Select onValueChange={(value) => setSelectedSubject(value)}>
-                            <SelectTrigger className="w-[200px]">
-                                <SelectValue placeholder="Subject" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                <SelectGroup>
-                                    <SelectLabel>Subject</SelectLabel>
-                                    {subjects && subjects.map(element => (
-                                        <SelectItem key={element.id} value={element.id.toString()}>
-                                            {element.name}
-                                        </SelectItem>
-                                    ))}
-                                </SelectGroup>
-                            </SelectContent>
-                        </Select>
+                        <div className="flex gap-2">
+                            <Select onValueChange={(value) => setSelectedSubject(value)}>
+                                <SelectTrigger className="w-[200px]">
+                                    <SelectValue placeholder="Subject" />
+                                </SelectTrigger>
+                                <SelectContent>
+                                    <SelectGroup>
+                                        <SelectLabel>Subject</SelectLabel>
+                                        {subjects && subjects.map(element => (
+                                            <SelectItem key={element.id} value={element.id.toString()}>
+                                                {element.name}
+                                            </SelectItem>
+                                        ))}
+                                    </SelectGroup>
+                                </SelectContent>
+                            </Select>
+                            <Button variant="outline" size="icon" onClick={() => setShowSubjectDialog(true)} disabled={!selecteddomain}>
+                                +
+                            </Button>
+                        </div>
                     </div>
 
                     <div className="grid gap-2">
@@ -755,6 +810,40 @@ export default function Modal() {
                     </Card>
                 ))}
             </div>
+
+            {/* Create Domain Dialog */}
+            <Dialog open={showDomainDialog} onOpenChange={setShowDomainDialog}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Add New Domain</DialogTitle>
+                    </DialogHeader>
+                    <Input
+                        placeholder="Domain Name"
+                        value={newDomainName}
+                        onChange={(e) => setNewDomainName(e.target.value)}
+                    />
+                    <Button onClick={handleCreateDomain} disabled={domainLoading}>
+                        Create Domain
+                    </Button>
+                </DialogContent>
+            </Dialog>
+
+            {/* Create Subject Dialog */}
+            <Dialog open={showSubjectDialog} onOpenChange={setShowSubjectDialog}>
+                <DialogContent>
+                    <DialogHeader>
+                        <DialogTitle>Add New Subject</DialogTitle>
+                    </DialogHeader>
+                    <Input
+                        placeholder="Subject Name"
+                        value={newSubjectName}
+                        onChange={(e) => setNewSubjectName(e.target.value)}
+                    />
+                    <Button onClick={handleCreateSubject} disabled={subjectLoading}>
+                        Create Subject
+                    </Button>
+                </DialogContent>
+            </Dialog>
         </div>
     );
 }
